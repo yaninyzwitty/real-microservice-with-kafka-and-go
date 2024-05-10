@@ -5,7 +5,6 @@ go 1.22.1
 require (
 	github.com/datastax/gocql-astra v0.0.0-20240422112156-762667383e8a
 	github.com/gocql/gocql v1.6.0
-	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	github.com/segmentio/kafka-go v0.4.47
