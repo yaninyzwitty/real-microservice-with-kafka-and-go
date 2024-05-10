@@ -25,9 +25,10 @@ import (
 
 var session *gocql.Session
 
-// var db *sql.DB
+var db *sql.DB
 var reader *kafka.Reader
 var ctx context.Context
+var mongoDbClient *mongo.Client
 
 func main() {
 	ctx = context.Background()
@@ -41,6 +42,7 @@ func main() {
 	kafka_passwd := os.Getenv("KAFKA_PASSWORD")
 	bootstrap_server := os.Getenv("BOOTSTRAP_SERVER")
 	mechanism, _ := scram.Mechanism(scram.SHA512, kafka_username, kafka_passwd)
+
 	reader = kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{bootstrap_server},
 		GroupID: "products",
@@ -72,7 +74,7 @@ func main() {
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().ApplyURI(mongoURL).SetServerAPIOptions(serverAPI)
 	// Create a new client and connect to the server
-	mongoDbClient, err := mongo.Connect(ctx, opts)
+	mongoDbClient, err = mongo.Connect(ctx, opts)
 	if err != nil {
 		log.Fatalf("error connecting to mongodb: %v", err)
 	}
@@ -86,7 +88,7 @@ func main() {
 
 	// CONNECTING WITH POSTGRES
 	connStr := os.Getenv("DATABASE_URL")
-	db, err := sql.Open("postgres", connStr)
+	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Error opening database: %v", err)
 	}
@@ -114,10 +116,12 @@ func consumeMessages() {
 		// Decode message data into Product struct
 
 		var product model.Product
+		// var postgresProduct model.ProductForPostgres
 		if err := json.Unmarshal(message.Value, &product); err != nil {
 			log.Printf("Error decoding message: %v", err)
 			continue
 		}
+
 		// Process the product (e.g., write to database)
 		if err := writeToDatabase(product); err != nil {
 			log.Printf("Error writing to database: %v", err)
@@ -134,12 +138,34 @@ func consumeMessages() {
 }
 
 func writeToDatabase(product model.Product) error {
-	err := session.Query("INSERT INTO chatsandra.products (product_id, name, description, price, quantity) VALUES (?, ?, ?, ?, ?)", product.ID, product.Name, product.Description, product.Price, product.Quantity).Exec()
+
+	// insert to mongodb
+	dbName := "myDatabase"
+	collectionName := "products"
+	collection := mongoDbClient.Database(dbName).Collection(collectionName)
+	_, err := collection.InsertOne(ctx, product)
+	if err != nil {
+		log.Printf("Error inserting product into MongoDB: %v", err)
+	}
+	log.Printf("Writing product to database: %+v", product)
+
+	// insert to postgres (change product type to uuid instead of gocql.uuid)
+
+	// _, err := db.Exec("INSERT INTO products (product_id, name, description, price, quantity) VALUES ($1, $2, $3, $4, $5)",
+	// 	product.ID, product.Name, product.Description, product.Price, product.Quantity)
+	// if err != nil {
+	// 	log.Printf("Error inserting product into PostgreSQL: %v", err)
+
+	// }
+	// log.Printf("Writing product to database: %+v", product)
+
+	// // insert to cassandra
+
+	err = session.Query("INSERT INTO chatsandra.products (product_id, name, description, price, quantity) VALUES (?, ?, ?, ?, ?)", product.ID, product.Name, product.Description, product.Price, product.Quantity).Exec()
 	if err != nil {
 		return fmt.Errorf("error inserting product into cassandra: %v", err)
 	}
 	log.Printf("Writing product to database: %+v", product)
-
 	return nil
 
 }
